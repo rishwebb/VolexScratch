@@ -83,9 +83,10 @@
                 smoothedLandmarks[label] = landmarks.map(p => ({...p}));
             } else {
                 landmarks.forEach((p, i) => {
+                    // FIX 1: Lowered smoothing from 0.45 to 0.1 to eliminate Z-axis jitter (zigzag)
                     smoothedLandmarks[label][i].x += (p.x - smoothedLandmarks[label][i].x) * 0.45;
                     smoothedLandmarks[label][i].y += (p.y - smoothedLandmarks[label][i].y) * 0.45;
-                    smoothedLandmarks[label][i].z += (p.z - smoothedLandmarks[label][i].z) * 0.45;
+                    smoothedLandmarks[label][i].z += (p.z - smoothedLandmarks[label][i].z) * 0.1; 
                 });
             }
             const pts = smoothedLandmarks[label];
@@ -111,18 +112,18 @@
         
         let isBuilding = false, buildTimer = 0;
         let isErasing = false, eraseTimer = 0;
-        let resetTimer = 0, rotateTimer = 0; // New timers for dual gestures
+        let resetTimer = 0, rotateTimer = 0; 
 
         let startPinchPos = null, activeAxis = null;
         let sketchKeys = new Set();
         
-        // UPDATED TIMING CONSTANTS PER REQUEST
-        const GRAB_HOLD = 500;       // 0.5s (Already 0.5s, kept same)
-        const INTENT_HOLD = 500;     // 0.5s (Changed from 1000 to 500)
-        const RESET_HOLD = 2000;     // 2.0s (New for Reset)
-        const ROTATE_HOLD = 1000;    // 1.0s (New for Rotate)
+        const GRAB_HOLD = 500;      
+        const INTENT_HOLD = 500;    
+        const RESET_HOLD = 1000;    
+        const ROTATE_HOLD = 1000;   
 
-        const pinchThreshold = 0.045;
+        // FIX 2: Increased threshold slightly (0.045 -> 0.05) to prevent accidental line breaks
+        const pinchThreshold = 0.05; 
 
         function getDist(p1, p2) { return Math.sqrt(Math.pow(p1.x-p2.x,2)+Math.pow(p1.y-p2.y,2)+(p1.z&&p2.z?Math.pow(p1.z-p2.z,2):0)); }
 
@@ -156,42 +157,37 @@
 
                 // 1. DUAL FIST RESET (2.0s Hold)
                 if (lFist && rFist) {
-                    rotateTimer = 0; // Clear rotate if fists are made
+                    rotateTimer = 0; 
                     if (resetTimer < RESET_HOLD) {
                         resetTimer += 16;
-                        // Draw center screen loader
                         drawHUDCircle(bioCtx, bioCanvas.width / 2, bioCanvas.height / 2, resetTimer/RESET_HOLD, "#ff0055");
                         modeEl.innerText = "SYSTEM: HOLD TO RESET...";
                     } else {
-                        // Action triggers after hold matches
                         voxelGroup.position.set(0, 0, 0);
                         voxelGroup.rotation.set(0, 0, 0);
                         modeEl.innerText = "SYSTEM: HARD_RESET COMPLETE";
                     }
-                    return; // Priority command stops other logic
+                    return; 
                 } else {
-                    resetTimer = 0; // Reset timer if gesture breaks
+                    resetTimer = 0; 
                 }
 
                 // 2. DUAL PALM ROTATION (1.0s Hold)
                 if (lPalm && rPalm) {
                     if (rotateTimer < ROTATE_HOLD) {
                         rotateTimer += 16;
-                        // Draw center screen loader
                         drawHUDCircle(bioCtx, bioCanvas.width / 2, bioCanvas.height / 2, rotateTimer/ROTATE_HOLD, "#00f0ff");
                         modeEl.innerText = "SYSTEM: HOLD TO ENABLE ROTATION...";
                     } else {
-                        // Action triggers continuously after hold passes
                         modeEl.innerText = "SYSTEM: GLOBAL_ROTATE ACTIVE";
                         voxelGroup.rotation.y += (rHand[9].x - lHand[9].x - 0.5) * 0.05;
                         voxelGroup.rotation.x += (rHand[9].y - lHand[9].y) * 0.05;
                     }
-                    return; // Priority command stops other logic
+                    return; 
                 } else {
-                    rotateTimer = 0; // Reset timer if gesture breaks
+                    rotateTimer = 0; 
                 }
             } else {
-                // Reset global timers if both hands aren't present
                 resetTimer = 0;
                 rotateTimer = 0;
             }
