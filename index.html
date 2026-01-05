@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Voxel Architect v4.0 - Dual Link Sync</title>
+    <title>Voxel Architect v4.1 - Sync Update</title>
     <style>
         body { margin: 0; background: #000; overflow: hidden; font-family: 'Courier New', monospace; }
         #input_video { position: absolute; width: 100vw; height: 100vh; object-fit: cover; transform: scaleX(-1); z-index: 1; }
@@ -19,10 +19,10 @@
 </head>
 <body>
     <div id="ui">
-        <div>BIO_SYNC: ARCHITECT_OS_v4.0</div>
+        <div>BIO_SYNC: ARCHITECT_OS_v4.1</div>
         <div>STATE: <span id="mode" class="stat-val">INITIALIZING</span></div>
         <div>VOXELS: <span id="count" class="stat-val">0</span></div>
-        <div style="font-size: 10px; margin-top: 5px; color: #ff3333;">2 FISTS: RESET | 2 PALMS: ROTATE</div>
+        <div style="font-size: 10px; margin-top: 5px; color: #ff3333;">2 FISTS: HOLD TO RESET | 2 PALMS: HOLD TO ROTATE</div>
     </div>
 
     <video id="input_video" autoplay playsinline></video>
@@ -111,11 +111,17 @@
         
         let isBuilding = false, buildTimer = 0;
         let isErasing = false, eraseTimer = 0;
+        let resetTimer = 0, rotateTimer = 0; // New timers for dual gestures
+
         let startPinchPos = null, activeAxis = null;
         let sketchKeys = new Set();
         
-        const GRAB_HOLD = 500;  // 0.5s
-        const INTENT_HOLD = 1000; // 1s
+        // UPDATED TIMING CONSTANTS PER REQUEST
+        const GRAB_HOLD = 500;       // 0.5s (Already 0.5s, kept same)
+        const INTENT_HOLD = 500;     // 0.5s (Changed from 1000 to 500)
+        const RESET_HOLD = 2000;     // 2.0s (New for Reset)
+        const ROTATE_HOLD = 1000;    // 1.0s (New for Rotate)
+
         const pinchThreshold = 0.045;
 
         function getDist(p1, p2) { return Math.sqrt(Math.pow(p1.x-p2.x,2)+Math.pow(p1.y-p2.y,2)+(p1.z&&p2.z?Math.pow(p1.z-p2.z,2):0)); }
@@ -123,9 +129,11 @@
         function onResults(results) {
             bioCtx.clearRect(0, 0, bioCanvas.width, bioCanvas.height);
             crosshair.visible = false;
+            
             if (!results.multiHandLandmarks) {
                 isGrabbing = false; isBuilding = false; isErasing = false;
                 grabTimer = 0; buildTimer = 0; eraseTimer = 0;
+                resetTimer = 0; rotateTimer = 0;
                 return;
             }
 
@@ -146,21 +154,46 @@
                 const lPalm = lHand[8].y < lHand[6].y && lHand[12].y < lHand[10].y && lHand[20].y < lHand[18].y;
                 const rPalm = rHand[8].y < rHand[6].y && rHand[12].y < rHand[10].y && rHand[20].y < rHand[18].y;
 
-                // 1. DUAL FIST RESET
+                // 1. DUAL FIST RESET (2.0s Hold)
                 if (lFist && rFist) {
-                    voxelGroup.position.set(0, 0, 0);
-                    voxelGroup.rotation.set(0, 0, 0);
-                    modeEl.innerText = "SYSTEM: HARD_RESET";
-                    return; // Priority command
+                    rotateTimer = 0; // Clear rotate if fists are made
+                    if (resetTimer < RESET_HOLD) {
+                        resetTimer += 16;
+                        // Draw center screen loader
+                        drawHUDCircle(bioCtx, bioCanvas.width / 2, bioCanvas.height / 2, resetTimer/RESET_HOLD, "#ff0055");
+                        modeEl.innerText = "SYSTEM: HOLD TO RESET...";
+                    } else {
+                        // Action triggers after hold matches
+                        voxelGroup.position.set(0, 0, 0);
+                        voxelGroup.rotation.set(0, 0, 0);
+                        modeEl.innerText = "SYSTEM: HARD_RESET COMPLETE";
+                    }
+                    return; // Priority command stops other logic
+                } else {
+                    resetTimer = 0; // Reset timer if gesture breaks
                 }
 
-                // 2. DUAL PALM ROTATION
+                // 2. DUAL PALM ROTATION (1.0s Hold)
                 if (lPalm && rPalm) {
-                    modeEl.innerText = "SYSTEM: GLOBAL_ROTATE";
-                    voxelGroup.rotation.y += (rHand[9].x - lHand[9].x - 0.5) * 0.05;
-                    voxelGroup.rotation.x += (rHand[9].y - lHand[9].y) * 0.05;
-                    return; // Priority command
+                    if (rotateTimer < ROTATE_HOLD) {
+                        rotateTimer += 16;
+                        // Draw center screen loader
+                        drawHUDCircle(bioCtx, bioCanvas.width / 2, bioCanvas.height / 2, rotateTimer/ROTATE_HOLD, "#00f0ff");
+                        modeEl.innerText = "SYSTEM: HOLD TO ENABLE ROTATION...";
+                    } else {
+                        // Action triggers continuously after hold passes
+                        modeEl.innerText = "SYSTEM: GLOBAL_ROTATE ACTIVE";
+                        voxelGroup.rotation.y += (rHand[9].x - lHand[9].x - 0.5) * 0.05;
+                        voxelGroup.rotation.x += (rHand[9].y - lHand[9].y) * 0.05;
+                    }
+                    return; // Priority command stops other logic
+                } else {
+                    rotateTimer = 0; // Reset timer if gesture breaks
                 }
+            } else {
+                // Reset global timers if both hands aren't present
+                resetTimer = 0;
+                rotateTimer = 0;
             }
 
             // L-HAND SINGLE LOGIC (0.5s GRAB)
@@ -183,7 +216,7 @@
                 } else { isGrabbing = false; grabTimer = 0; if(isPalm) modeEl.innerText = "BIO_LINK: SCANNING"; }
             }
 
-            // R-HAND SINGLE LOGIC (BUILD / ERASE)
+            // R-HAND SINGLE LOGIC (BUILD / ERASE - NOW 0.5s)
             if (rHand) {
                 const thumbTip = rHand[4], indexTip = rHand[8], midTip = rHand[12];
                 const pinchingNow = getDist(thumbTip, indexTip) < pinchThreshold;
