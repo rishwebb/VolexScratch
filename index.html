@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Voxel Architect v3.9 - High Intent Sync</title>
+    <title>Voxel Architect v4.0 - Dual Link Sync</title>
     <style>
         body { margin: 0; background: #000; overflow: hidden; font-family: 'Courier New', monospace; }
         #input_video { position: absolute; width: 100vw; height: 100vh; object-fit: cover; transform: scaleX(-1); z-index: 1; }
@@ -19,9 +19,10 @@
 </head>
 <body>
     <div id="ui">
-        <div>BIO_SYNC: ARCHITECT_OS_v3.9</div>
-        <div>STATE: <span id="mode" class="stat-val">CALIBRATING</span></div>
+        <div>BIO_SYNC: ARCHITECT_OS_v4.0</div>
+        <div>STATE: <span id="mode" class="stat-val">INITIALIZING</span></div>
         <div>VOXELS: <span id="count" class="stat-val">0</span></div>
+        <div style="font-size: 10px; margin-top: 5px; color: #ff3333;">2 FISTS: RESET | 2 PALMS: ROTATE</div>
     </div>
 
     <video id="input_video" autoplay playsinline></video>
@@ -84,6 +85,7 @@
                 landmarks.forEach((p, i) => {
                     smoothedLandmarks[label][i].x += (p.x - smoothedLandmarks[label][i].x) * 0.45;
                     smoothedLandmarks[label][i].y += (p.y - smoothedLandmarks[label][i].y) * 0.45;
+                    smoothedLandmarks[label][i].z += (p.z - smoothedLandmarks[label][i].z) * 0.45;
                 });
             }
             const pts = smoothedLandmarks[label];
@@ -103,7 +105,7 @@
             });
         }
 
-        // --- 3. LOGIC & TIMERS ---
+        // --- 3. STATE & TIMERS ---
         let isGrabbing = false, grabTimer = 0;
         let grabOffset = new THREE.Vector3();
         
@@ -128,6 +130,8 @@
             }
 
             let lHand = null, rHand = null;
+            let handsDetected = results.multiHandedness.length;
+
             results.multiHandedness.forEach((hand, idx) => {
                 const landmarks = results.multiHandLandmarks[idx];
                 drawCyberHand(bioCtx, landmarks, hand.label);
@@ -135,7 +139,31 @@
                 if(hand.label === 'Right') rHand = smoothedLandmarks['Right'];
             });
 
-            // L-HAND (0.5s GRAB)
+            // --- GLOBAL DUAL-HAND GESTURES ---
+            if (lHand && rHand) {
+                const lFist = lHand[8].y > lHand[6].y && lHand[12].y > lHand[10].y && lHand[16].y > lHand[14].y;
+                const rFist = rHand[8].y > rHand[6].y && rHand[12].y > rHand[10].y && rHand[16].y > rHand[14].y;
+                const lPalm = lHand[8].y < lHand[6].y && lHand[12].y < lHand[10].y && lHand[20].y < lHand[18].y;
+                const rPalm = rHand[8].y < rHand[6].y && rHand[12].y < rHand[10].y && rHand[20].y < rHand[18].y;
+
+                // 1. DUAL FIST RESET
+                if (lFist && rFist) {
+                    voxelGroup.position.set(0, 0, 0);
+                    voxelGroup.rotation.set(0, 0, 0);
+                    modeEl.innerText = "SYSTEM: HARD_RESET";
+                    return; // Priority command
+                }
+
+                // 2. DUAL PALM ROTATION
+                if (lPalm && rPalm) {
+                    modeEl.innerText = "SYSTEM: GLOBAL_ROTATE";
+                    voxelGroup.rotation.y += (rHand[9].x - lHand[9].x - 0.5) * 0.05;
+                    voxelGroup.rotation.x += (rHand[9].y - lHand[9].y) * 0.05;
+                    return; // Priority command
+                }
+            }
+
+            // L-HAND SINGLE LOGIC (0.5s GRAB)
             let lPinching = false;
             if (lHand) {
                 const isFist = lHand[8].y > lHand[6].y && lHand[12].y > lHand[10].y && lHand[16].y > lHand[14].y;
@@ -155,7 +183,7 @@
                 } else { isGrabbing = false; grabTimer = 0; if(isPalm) modeEl.innerText = "BIO_LINK: SCANNING"; }
             }
 
-            // R-HAND (1s BUILD / ERASE)
+            // R-HAND SINGLE LOGIC (BUILD / ERASE)
             if (rHand) {
                 const thumbTip = rHand[4], indexTip = rHand[8], midTip = rHand[12];
                 const pinchingNow = getDist(thumbTip, indexTip) < pinchThreshold;
@@ -167,9 +195,8 @@
                 const localPos = voxelGroup.worldToLocal(worldPos.clone());
                 const gx = Math.round(localPos.x / gridSize) * gridSize, gy = Math.round(localPos.y / gridSize) * gridSize, gz = Math.round(localPos.z / gridSize) * gridSize;
 
-                // ERASER LOGIC (L-Pinch + R-Point)
                 if (lPinching && pointingNow && !palmOpen) {
-                    buildTimer = 0; // Cancel build
+                    buildTimer = 0;
                     if (eraseTimer < INTENT_HOLD) {
                         eraseTimer += 16;
                         drawHUDCircle(bioCtx, px, py, eraseTimer/INTENT_HOLD, "#ff3333");
@@ -185,9 +212,8 @@
                         modeEl.innerText = "INTENT: ERASER_ACTIVE";
                     }
                 } 
-                // BUILD LOGIC (Pinch)
                 else if (pinchingNow && !isGrabbing && !palmOpen) {
-                    eraseTimer = 0; // Cancel erase
+                    eraseTimer = 0;
                     if (buildTimer < INTENT_HOLD) {
                         buildTimer += 16;
                         drawHUDCircle(bioCtx, px, py, buildTimer/INTENT_HOLD, "#00ffcc");
@@ -208,7 +234,6 @@
                         modeEl.innerText = "INTENT: BUILDING";
                     }
                 } 
-                // RESET / COMMIT
                 else {
                     if (palmOpen) {
                         if (isBuilding) commitVoxels();
