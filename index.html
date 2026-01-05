@@ -40,7 +40,6 @@
         const modeEl = document.getElementById('mode');
         const countEl = document.getElementById('count');
 
-        // --- 1. THREE.JS ENGINE ---
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
         const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('three_canvas'), antialias: true, alpha: true });
@@ -66,7 +65,6 @@
         scene.add(sun);
         camera.position.z = 20;
 
-        // --- 2. HUD & SKELETON ---
         let smoothedLandmarks = { Left: [], Right: [] };
 
         function drawHUDCircle(ctx, x, y, progress, color) {
@@ -83,7 +81,6 @@
                 smoothedLandmarks[label] = landmarks.map(p => ({...p}));
             } else {
                 landmarks.forEach((p, i) => {
-                    // FIX 1: Lowered smoothing from 0.45 to 0.1 to eliminate Z-axis jitter (zigzag)
                     smoothedLandmarks[label][i].x += (p.x - smoothedLandmarks[label][i].x) * 0.45;
                     smoothedLandmarks[label][i].y += (p.y - smoothedLandmarks[label][i].y) * 0.45;
                     smoothedLandmarks[label][i].z += (p.z - smoothedLandmarks[label][i].z) * 0.1; 
@@ -106,7 +103,6 @@
             });
         }
 
-        // --- 3. STATE & TIMERS ---
         let isGrabbing = false, grabTimer = 0;
         let grabOffset = new THREE.Vector3();
         
@@ -122,7 +118,6 @@
         const RESET_HOLD = 1000;    
         const ROTATE_HOLD = 1000;   
 
-        // FIX 2: Increased threshold slightly (0.045 -> 0.05) to prevent accidental line breaks
         const pinchThreshold = 0.05; 
 
         function getDist(p1, p2) { return Math.sqrt(Math.pow(p1.x-p2.x,2)+Math.pow(p1.y-p2.y,2)+(p1.z&&p2.z?Math.pow(p1.z-p2.z,2):0)); }
@@ -148,14 +143,12 @@
                 if(hand.label === 'Right') rHand = smoothedLandmarks['Right'];
             });
 
-            // --- GLOBAL DUAL-HAND GESTURES ---
             if (lHand && rHand) {
                 const lFist = lHand[8].y > lHand[6].y && lHand[12].y > lHand[10].y && lHand[16].y > lHand[14].y;
                 const rFist = rHand[8].y > rHand[6].y && rHand[12].y > rHand[10].y && rHand[16].y > rHand[14].y;
                 const lPalm = lHand[8].y < lHand[6].y && lHand[12].y < lHand[10].y && lHand[20].y < lHand[18].y;
                 const rPalm = rHand[8].y < rHand[6].y && rHand[12].y < rHand[10].y && rHand[20].y < rHand[18].y;
 
-                // 1. DUAL FIST RESET (2.0s Hold)
                 if (lFist && rFist) {
                     rotateTimer = 0; 
                     if (resetTimer < RESET_HOLD) {
@@ -172,7 +165,6 @@
                     resetTimer = 0; 
                 }
 
-                // 2. DUAL PALM ROTATION (1.0s Hold)
                 if (lPalm && rPalm) {
                     if (rotateTimer < ROTATE_HOLD) {
                         rotateTimer += 16;
@@ -192,7 +184,6 @@
                 rotateTimer = 0;
             }
 
-            // L-HAND SINGLE LOGIC (0.5s GRAB)
             let lPinching = false;
             if (lHand) {
                 const isFist = lHand[8].y > lHand[6].y && lHand[12].y > lHand[10].y && lHand[16].y > lHand[14].y;
@@ -212,7 +203,6 @@
                 } else { isGrabbing = false; grabTimer = 0; if(isPalm) modeEl.innerText = "BIO_LINK: SCANNING"; }
             }
 
-            // R-HAND SINGLE LOGIC (BUILD / ERASE - NOW 0.5s)
             if (rHand) {
                 const thumbTip = rHand[4], indexTip = rHand[8], midTip = rHand[12];
                 const pinchingNow = getDist(thumbTip, indexTip) < pinchThreshold;
