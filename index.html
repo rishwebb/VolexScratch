@@ -22,7 +22,7 @@
         <div>BIO_SYNC: ARCHITECT_OS_v4.1</div>
         <div>STATE: <span id="mode" class="stat-val">INITIALIZING</span></div>
         <div>VOXELS: <span id="count" class="stat-val">0</span></div>
-        <div style="font-size: 10px; margin-top: 5px; color: #ff3333;">2 FISTS: HOLD TO RESET | 2 PALMS: HOLD TO ROTATE</div>
+        <div style="font-size: 10px; margin-top: 5px; color: #ff3333;">L-THUMBS: GRAVITY | R-PEACE: RAINBOW | L-PEACE: COLOR CYCLE</div>
     </div>
 
     <video id="input_video" autoplay playsinline></video>
@@ -34,6 +34,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 
     <script>
+        // If you touch these variables without knowing Three.js, fuck you 💀
         const videoElement = document.getElementById('input_video');
         const bioCanvas = document.getElementById('biometric_canvas');
         const bioCtx = bioCanvas.getContext('2d');
@@ -53,6 +54,13 @@
         const gridSize = 1.2; 
         const placedVoxels = new Map();
         
+        // New state variables because I have to carry this whole project 🙄
+        let gravityEnabled = false;
+        let rainbowActive = false;
+        let globalColorList = [0x00f0ff, 0xff0055, 0x00ff00, 0xffff00, 0xff00ff, 0xffffff];
+        let colorIndex = 0;
+        let lastLVictoryState = false;
+
         const crosshair = new THREE.Mesh(
             new THREE.BoxGeometry(gridSize, gridSize, gridSize),
             new THREE.MeshBasicMaterial({ color: 0x00f0ff, wireframe: true, transparent: true, opacity: 0.5 })
@@ -105,7 +113,6 @@
 
         let isGrabbing = false, grabTimer = 0;
         let grabOffset = new THREE.Vector3();
-        
         let isBuilding = false, buildTimer = 0;
         let isErasing = false, eraseTimer = 0;
         let resetTimer = 0, rotateTimer = 0; 
@@ -117,7 +124,6 @@
         const INTENT_HOLD = 500;    
         const RESET_HOLD = 1000;    
         const ROTATE_HOLD = 1000;   
-
         const pinchThreshold = 0.05; 
 
         function getDist(p1, p2) { return Math.sqrt(Math.pow(p1.x-p2.x,2)+Math.pow(p1.y-p2.y,2)+(p1.z&&p2.z?Math.pow(p1.z-p2.z,2):0)); }
@@ -130,12 +136,11 @@
                 isGrabbing = false; isBuilding = false; isErasing = false;
                 grabTimer = 0; buildTimer = 0; eraseTimer = 0;
                 resetTimer = 0; rotateTimer = 0;
+                rainbowActive = false;
                 return;
             }
 
             let lHand = null, rHand = null;
-            let handsDetected = results.multiHandedness.length;
-
             results.multiHandedness.forEach((hand, idx) => {
                 const landmarks = results.multiHandLandmarks[idx];
                 drawCyberHand(bioCtx, landmarks, hand.label);
@@ -143,6 +148,51 @@
                 if(hand.label === 'Right') rHand = smoothedLandmarks['Right'];
             });
 
+            // 1. Gravity Logic (Left Hand)
+            // Thumbs logic is absolute garbage but MediaPipe is weird 🤡
+            if (lHand) {
+                const isThumbDown = lHand[4].y > lHand[3].y && lHand[4].y > lHand[2].y;
+                const isThumbUp = lHand[4].y < lHand[3].y && lHand[4].y < lHand[2].y;
+                
+                if (isThumbDown && !gravityEnabled) {
+                    gravityEnabled = true;
+                    applyGravity();
+                } else if (isThumbUp && gravityEnabled) {
+                    gravityEnabled = false;
+                    resetGravity();
+                }
+
+                // 3. Global Color Toggle (Left Hand Victory)
+                // Toggle logic because I don't want it flashing like a cheap light 💡
+                const isLVictory = lHand[8].y < lHand[6].y && lHand[12].y < lHand[10].y && lHand[16].y > lHand[14].y;
+                if (isLVictory && !lastLVictoryState) {
+                    colorIndex = (colorIndex + 1) % globalColorList.length;
+                    updateGlobalColors();
+                    lastLVictoryState = true;
+                } else if (!isLVictory) {
+                    lastLVictoryState = false;
+                }
+            }
+
+            // 2. Rainbow Mode (Right Hand Victory)
+            // Optimization at its peak because I have no time to be slow ⚡
+            if (rHand) {
+                const isRVictory = rHand[8].y < rHand[6].y && rHand[12].y < rHand[10].y && rHand[16].y > rHand[14].y;
+                rainbowActive = isRVictory;
+            } else {
+                rainbowActive = false;
+            }
+
+            if (rainbowActive) {
+                // This loop is ugly but it works sexy 💅
+                placedVoxels.forEach(mesh => {
+                    const randColor = Math.random() * 0xffffff;
+                    mesh.material.emissive.setHex(randColor);
+                    mesh.children[0].material.color.setHex(randColor);
+                });
+            }
+
+            // Existing logic detection continues...
             if (lHand && rHand) {
                 const lFist = lHand[8].y > lHand[6].y && lHand[12].y > lHand[10].y && lHand[16].y > lHand[14].y;
                 const rFist = rHand[8].y > rHand[6].y && rHand[12].y > rHand[10].y && rHand[16].y > rHand[14].y;
@@ -161,9 +211,7 @@
                         modeEl.innerText = "SYSTEM: HARD_RESET COMPLETE";
                     }
                     return; 
-                } else {
-                    resetTimer = 0; 
-                }
+                } else { resetTimer = 0; }
 
                 if (lPalm && rPalm) {
                     if (rotateTimer < ROTATE_HOLD) {
@@ -176,12 +224,7 @@
                         voxelGroup.rotation.x += (rHand[9].y - lHand[9].y) * 0.05;
                     }
                     return; 
-                } else {
-                    rotateTimer = 0; 
-                }
-            } else {
-                resetTimer = 0;
-                rotateTimer = 0;
+                } else { rotateTimer = 0; }
             }
 
             let lPinching = false;
@@ -270,10 +313,37 @@
             }
         }
 
+        // Gravity logic: if an error happens here, even God is confused 💀
+        function applyGravity() {
+            placedVoxels.forEach(mesh => {
+                if (mesh.userData.origY === undefined) mesh.userData.origY = mesh.position.y;
+                mesh.position.y = -8; 
+            });
+            modeEl.innerText = "SYSTEM: GRAVITY_ON";
+        }
+
+        function resetGravity() {
+            placedVoxels.forEach(mesh => {
+                if (mesh.userData.origY !== undefined) mesh.position.y = mesh.userData.origY;
+            });
+            modeEl.innerText = "SYSTEM: GRAVITY_OFF";
+        }
+
+        // Don't touch this color update or the UI will die 😤
+        function updateGlobalColors() {
+            const newCol = globalColorList[colorIndex];
+            placedVoxels.forEach(mesh => {
+                mesh.material.emissive.setHex(newCol);
+                mesh.children[0].material.color.setHex(newCol);
+            });
+            crosshair.material.color.setHex(newCol);
+            modeEl.innerText = `COLOR: SYNCED_${colorIndex}`;
+        }
+
         function addSketchVoxel(x, y, z) {
             const key = `${x.toFixed(1)},${y.toFixed(1)},${z.toFixed(1)}`;
             if (sketchKeys.has(key) || placedVoxels.has(key)) return;
-            const mesh = new THREE.Mesh(new THREE.BoxGeometry(gridSize*0.98, gridSize*0.98, gridSize*0.98), new THREE.MeshBasicMaterial({ color: 0x00f0ff, wireframe: true }));
+            const mesh = new THREE.Mesh(new THREE.BoxGeometry(gridSize*0.98, gridSize*0.98, gridSize*0.98), new THREE.MeshBasicMaterial({ color: globalColorList[colorIndex], wireframe: true }));
             mesh.position.set(x, y, z);
             currentSketch.add(mesh);
             sketchKeys.add(key);
@@ -293,10 +363,11 @@
 
         function createFinalCube(x, y, z) {
             const g = new THREE.BoxGeometry(gridSize*0.95, gridSize*0.95, gridSize*0.95);
-            const m = new THREE.MeshPhongMaterial({ color: 0x001122, emissive: 0x00f0ff, emissiveIntensity: 0.4, transparent: true, opacity: 0.8 });
+            const targetColor = globalColorList[colorIndex];
+            const m = new THREE.MeshPhongMaterial({ color: 0x001122, emissive: targetColor, emissiveIntensity: 0.4, transparent: true, opacity: 0.8 });
             const mesh = new THREE.Mesh(g, m);
             mesh.position.set(x, y, z);
-            mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(g), new THREE.LineBasicMaterial({ color: 0x00f0ff })));
+            mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(g), new THREE.LineBasicMaterial({ color: targetColor })));
             return mesh;
         }
 
@@ -309,3 +380,4 @@
     </script>
 </body>
 </html>
+
