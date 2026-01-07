@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Voxel Architect v4.1 - Sync Update</title>
+    <title>Voxel Architect v4.1 - Rebuilt & Fixed</title>
     <style>
         body { margin: 0; background: #000; overflow: hidden; font-family: 'Courier New', monospace; }
         #input_video { position: absolute; width: 100vw; height: 100vh; object-fit: cover; transform: scaleX(-1); z-index: 1; }
@@ -54,21 +54,19 @@
         const gridSize = 1.2; 
         const placedVoxels = new Map();
         
-        // State management for the new chaos 🌪️
+        // State variables for the new madness 🌪️
         let gravityState = "UP"; // UP, FALLING, DOWN, RISING
         let rainbowActive = false;
-        let globalColorList = [0x00f0ff, 0xff0055, 0x00ff00, 0xffff00, 0xff00ff, 0xffffff, 0xffa500, 0x7fff00, 0x00ffff];
+        let globalColorList = [0x00f0ff, 0xff0055, 0x00ff00, 0xffff00, 0xff00ff, 0xffa500, 0xffffff];
         let colorIndex = 0;
-        let lastLVictoryHandPresent = false;
-        
-        // Timers reduced by half for peak speed ⚡
+        let lastLVictoryState = false;
+
+        // Timers reduced to half for peak speed ⚡
         const GRAB_HOLD = 250;      
         const INTENT_HOLD = 250;    
         const RESET_HOLD = 500;    
         const ROTATE_HOLD = 500;   
-        const GESTURE_HOLD = 250; // New universal hold for gravity/color
-
-        let gravityTimer = 0, rainbowTimer = 0, colorTimer = 0;
+        const GESTURE_HOLD = 250; 
 
         const crosshair = new THREE.Mesh(
             new THREE.BoxGeometry(gridSize, gridSize, gridSize),
@@ -119,6 +117,7 @@
         let isBuilding = false, buildTimer = 0;
         let isErasing = false, eraseTimer = 0;
         let resetTimer = 0, rotateTimer = 0; 
+        let gravityTimer = 0, colorTimer = 0;
 
         let startPinchPos = null, activeAxis = null;
         let sketchKeys = new Set();
@@ -140,6 +139,9 @@
                 });
             }
 
+            // --- GRAVITY ENGINE PHYSICS ---
+            updateGravityPhysics();
+
             // 1. Gravity Logic (Left Hand) 📉
             if (lHand) {
                 const isThumbDown = lHand[4].y > lHand[3].y && lHand[4].y > lHand[17].y;
@@ -160,103 +162,126 @@
                 if (isLVictory) {
                     colorTimer += 16;
                     drawHUDCircle(bioCtx, lHand[9].x * bioCanvas.width, lHand[9].y * bioCanvas.height, colorTimer/GESTURE_HOLD, "#ffffff");
-                    if (colorTimer >= GESTURE_HOLD && !lastLVictoryHandPresent) {
+                    if (colorTimer >= GESTURE_HOLD && !lastLVictoryState) {
                         colorIndex = (colorIndex + 1) % globalColorList.length;
                         updateGlobalColors();
-                        lastLVictoryHandPresent = true;
+                        lastLVictoryState = true;
                     }
-                } else { colorTimer = 0; lastLVictoryHandPresent = false; }
+                } else { colorTimer = 0; lastLVictoryState = false; }
             }
 
-            // 2. Continuous Rainbow Mode (Right Hand Victory) 🌈
+            // 2. Rainbow DJ Mode (Right Hand Victory) 🌈
             if (rHand) {
                 const isRVictory = rHand[8].y < rHand[6].y && rHand[12].y < rHand[10].y && rHand[16].y > rHand[14].y;
                 if (isRVictory) {
                     rainbowActive = true;
-                    modeEl.innerText = "SYSTEM: DJ_MODE_ACTIVE";
+                    modeEl.innerText = "SYSTEM: DJ_MODE";
                     placedVoxels.forEach(mesh => {
                         const rand = Math.random() * 0xffffff;
                         mesh.material.emissive.setHex(rand);
                         mesh.children[0].material.color.setHex(rand);
                     });
-                } else {
-                    if (rainbowActive) stopRainbow();
-                }
-            } else {
-                if (rainbowActive) stopRainbow();
-            }
+                } else if (rainbowActive) { stopRainbow(); }
+            } else if (rainbowActive) { stopRainbow(); }
 
-            // Gravity Physics Simulation (Smooth Fall/Bounce) ⚾
-            updateGravityPhysics();
-
-            // --- Original Logic (Half Timers) ---
+            // --- RESET & ROTATE (2 Hands) ---
             if (lHand && rHand) {
                 const lFist = lHand[8].y > lHand[6].y && lHand[12].y > lHand[10].y && lHand[16].y > lHand[14].y;
                 const rFist = rHand[8].y > rHand[6].y && rHand[12].y > rHand[10].y && rHand[16].y > rHand[14].y;
+                const lPalm = lHand[8].y < lHand[6].y && lHand[12].y < lHand[10].y && lHand[20].y < lHand[18].y;
+                const rPalm = rHand[8].y < rHand[6].y && rHand[12].y < rHand[10].y && rHand[20].y < rHand[18].y;
+
                 if (lFist && rFist) {
                     resetTimer += 16;
                     drawHUDCircle(bioCtx, bioCanvas.width / 2, bioCanvas.height / 2, resetTimer/RESET_HOLD, "#ff0055");
                     if (resetTimer >= RESET_HOLD) { voxelGroup.position.set(0,0,0); voxelGroup.rotation.set(0,0,0); }
-                    return;
                 } else { resetTimer = 0; }
-            }
 
-            // Drawing logic
-            if (rHand) {
-                const indexTip = rHand[8];
-                const pinchingNow = getDist(rHand[4], indexTip) < pinchThreshold;
-                const palmOpen = rHand[8].y < rHand[6].y && rHand[12].y < rHand[10].y;
-                const worldPos = new THREE.Vector3((0.5 - indexTip.x) * 25, (0.5 - indexTip.y) * 18, -indexTip.z * 25);
-                const localPos = voxelGroup.worldToLocal(worldPos.clone());
-                const gx = Math.round(localPos.x / gridSize) * gridSize, gy = Math.round(localPos.y / gridSize) * gridSize, gz = Math.round(localPos.z / gridSize) * gridSize;
-
-                if (pinchingNow && !palmOpen) {
-                    buildTimer += 16;
-                    drawHUDCircle(bioCtx, indexTip.x * bioCanvas.width, indexTip.y * bioCanvas.height, buildTimer/INTENT_HOLD, "#00ffcc");
-                    if (buildTimer >= INTENT_HOLD) {
-                        if (!isBuilding) { startPinchPos = { x: gx, y: gy, z: gz }; sketchKeys.clear(); isBuilding = true; }
-                        else {
-                            let tx = startPinchPos.x, ty = startPinchPos.y, tz = startPinchPos.z;
-                            const dx = Math.abs(gx - tx), dy = Math.abs(gy - ty), dz = Math.abs(gz - tz);
-                            if (dx >= dy && dx >= dz) tx = gx; else if (dy >= dx && dy >= dz) ty = gy; else tz = gz;
-                            addSketchVoxel(tx, ty, tz);
-                        }
+                if (lPalm && rPalm) {
+                    rotateTimer += 16;
+                    drawHUDCircle(bioCtx, bioCanvas.width / 2, bioCanvas.height / 2, rotateTimer/ROTATE_HOLD, "#00f0ff");
+                    if (rotateTimer >= ROTATE_HOLD) {
+                        voxelGroup.rotation.y += (rHand[9].x - lHand[9].x - 0.5) * 0.05;
+                        voxelGroup.rotation.x += (rHand[9].y - lHand[9].y) * 0.05;
                     }
-                } else { 
-                    if (isBuilding && palmOpen) commitVoxels();
-                    isBuilding = false; buildTimer = 0; 
-                }
+                } else { rotateTimer = 0; }
+            }
 
-                if (isBuilding || buildTimer > 0) {
-                    crosshair.visible = true;
-                    crosshair.position.copy(voxelGroup.localToWorld(new THREE.Vector3(gx, gy, gz)));
+            // --- DRAWING & ERASING (PINCH TO DO) ---
+            if (lHand) {
+                const lPinching = getDist(lHand[4], lHand[8]) < pinchThreshold;
+                const lFist = lHand[8].y > lHand[6].y && lHand[12].y > lHand[10].y && lHand[16].y > lHand[14].y;
+                const handWorldPos = new THREE.Vector3((0.5 - lHand[9].x) * 25, (0.5 - lHand[9].y) * 18, 0);
+
+                if (lFist) {
+                    grabTimer += 16;
+                    drawHUDCircle(bioCtx, lHand[0].x * bioCanvas.width, lHand[0].y * bioCanvas.height, grabTimer/GRAB_HOLD, "#ffbb00");
+                    if (grabTimer >= GRAB_HOLD) {
+                        if (!isGrabbing) { grabOffset.copy(voxelGroup.position).sub(handWorldPos); isGrabbing = true; }
+                        voxelGroup.position.copy(handWorldPos).add(grabOffset);
+                        modeEl.innerText = "BIO_LINK: GRABBED";
+                    }
+                } else { isGrabbing = false; grabTimer = 0; }
+
+                if (rHand) {
+                    const rIndexTip = rHand[8];
+                    const rPinching = getDist(rHand[4], rIndexTip) < pinchThreshold;
+                    const rPointing = rIndexTip.y < rHand[6].y && rHand[12].y > rHand[10].y;
+                    const rPalmOpen = rHand[8].y < rHand[6].y && rHand[12].y < rHand[10].y;
+
+                    const worldPos = new THREE.Vector3((0.5 - rIndexTip.x) * 25, (0.5 - rIndexTip.y) * 18, -rIndexTip.z * 25);
+                    const localPos = voxelGroup.worldToLocal(worldPos.clone());
+                    const gx = Math.round(localPos.x / gridSize) * gridSize, gy = Math.round(localPos.y / gridSize) * gridSize, gz = Math.round(localPos.z / gridSize) * gridSize;
+
+                    // Erase Logic
+                    if (lPinching && rPointing && !rPalmOpen) {
+                        eraseTimer += 16;
+                        drawHUDCircle(bioCtx, rIndexTip.x * bioCanvas.width, rIndexTip.y * bioCanvas.height, eraseTimer/INTENT_HOLD, "#ff3333");
+                        if (eraseTimer >= INTENT_HOLD) {
+                            const key = `${gx.toFixed(1)},${gy.toFixed(1)},${gz.toFixed(1)}`;
+                            if (placedVoxels.has(key)) { voxelGroup.remove(placedVoxels.get(key)); placedVoxels.delete(key); countEl.innerText = placedVoxels.size; }
+                        }
+                    } else if (rPinching && !isGrabbing && !rPalmOpen) {
+                        // Build Logic
+                        buildTimer += 16;
+                        drawHUDCircle(bioCtx, rIndexTip.x * bioCanvas.width, rIndexTip.y * bioCanvas.height, buildTimer/INTENT_HOLD, "#00ffcc");
+                        if (buildTimer >= INTENT_HOLD) {
+                            if (!isBuilding) { startPinchPos = { x: gx, y: gy, z: gz }; sketchKeys.clear(); isBuilding = true; activeAxis = null; }
+                            else {
+                                const dx = Math.abs(gx - startPinchPos.x), dy = Math.abs(gy - startPinchPos.y), dz = Math.abs(gz - startPinchPos.z);
+                                if (!activeAxis && (dx > 0.4 || dy > 0.4 || dz > 0.4)) {
+                                    if (dx >= dy && dx >= dz) activeAxis = 'x'; else if (dy >= dx && dy >= dz) activeAxis = 'y'; else activeAxis = 'z';
+                                }
+                                let tx = startPinchPos.x, ty = startPinchPos.y, tz = startPinchPos.z;
+                                if (activeAxis === 'x') tx = gx; else if (activeAxis === 'y') ty = gy; else if (activeAxis === 'z') tz = gz;
+                                addSketchVoxel(tx, ty, tz);
+                            }
+                        }
+                    } else {
+                        if (isBuilding && rPalmOpen) commitVoxels();
+                        isBuilding = false; isErasing = false; buildTimer = 0; eraseTimer = 0;
+                    }
+
+                    if (isBuilding || buildTimer > 0 || isErasing || eraseTimer > 0) {
+                        crosshair.visible = true;
+                        crosshair.position.copy(voxelGroup.localToWorld(new THREE.Vector3(gx, gy, gz)));
+                    }
                 }
             }
         }
 
-        // Gravity logic: if an error happens here, even God is confused 💀
-        function applyGravity() {
-            placedVoxels.forEach(mesh => {
-                mesh.userData.origPos = mesh.position.clone();
-                mesh.userData.targetY = -12 + (Math.random() * 2); 
-                mesh.userData.velocity = 0;
-                mesh.userData.bounceCount = 0;
-            });
-            gravityState = "FALLING";
-            modeEl.innerText = "SYSTEM: GRAVITY_FALL";
-        }
+        // --- CORE FUNCTIONS (FIXED) ---
 
         function updateGravityPhysics() {
             if (gravityState === "FALLING") {
                 let allSettled = true;
                 placedVoxels.forEach(mesh => {
                     if (mesh.position.y > mesh.userData.targetY || Math.abs(mesh.userData.velocity) > 0.1) {
-                        mesh.userData.velocity -= 0.05; // Gravity pull
+                        mesh.userData.velocity -= 0.08; 
                         mesh.position.y += mesh.userData.velocity;
                         if (mesh.position.y <= mesh.userData.targetY) {
                             mesh.position.y = mesh.userData.targetY;
-                            mesh.userData.velocity *= -0.4; // Small bounce 🏀
-                            mesh.userData.bounceCount++;
+                            mesh.userData.velocity *= -0.3; // Bounce 🏀
                         }
                         allSettled = false;
                     }
@@ -266,28 +291,33 @@
                 let allHome = true;
                 placedVoxels.forEach(mesh => {
                     const dist = mesh.position.distanceTo(mesh.userData.origPos);
-                    if (dist > 0.1) {
-                        mesh.position.lerp(mesh.userData.origPos, 0.2);
-                        allHome = false;
-                    } else { mesh.position.copy(mesh.userData.origPos); }
+                    if (dist > 0.05) { mesh.position.lerp(mesh.userData.origPos, 0.2); allHome = false; }
+                    else { mesh.position.copy(mesh.userData.origPos); }
                 });
                 if (allHome) gravityState = "UP";
             }
         }
 
-        function resetGravity() {
-            gravityState = "RISING";
-            modeEl.innerText = "SYSTEM: GRAVITY_RESET";
+        function applyGravity() {
+            if (gravityState !== "UP") return;
+            placedVoxels.forEach(mesh => {
+                mesh.userData.origPos = mesh.position.clone();
+                mesh.userData.targetY = -12 + (Math.random() * 1.5); 
+                mesh.userData.velocity = 0;
+            });
+            gravityState = "FALLING";
         }
 
-        // Optimization at its peak because I have no time to be slow ⚡
+        function resetGravity() {
+            if (gravityState !== "DOWN") return;
+            gravityState = "RISING";
+        }
+
         function stopRainbow() {
             rainbowActive = false;
             updateGlobalColors();
-            modeEl.innerText = "SYSTEM: DJ_MODE_OFF";
         }
 
-        // Don't touch this color update or the UI will die 😤
         function updateGlobalColors() {
             const newCol = globalColorList[colorIndex];
             placedVoxels.forEach(mesh => {
